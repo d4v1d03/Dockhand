@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Dockhand — new task{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h1>New task</h1>
+  <p class="muted">
+    Describe what you want done. Optionally point at a public git repository —
+    the agent will clone it into a fresh sandbox and work there.
+  </p>
+
+  <form class="task-form" method="post" action="/api/sessions">
+    <label>
+      <span>Task</span>
+      <textarea name="prompt" rows="5" required
+        placeholder="e.g. Add a --version flag to the CLI and write a test for it."></textarea>
+    </label>
+
+    <label>
+      <span>Repository URL <em class="muted">(optional)</em></span>
+      <input type="url" name="repo_url" placeholder="https://github.com/owner/repo">
+    </label>
+
+    <div class="form-row">
+      <span class="pill pill-neutral" title="Set LLM_MODEL in .env">
+        {{ settings.llm_model or "no model configured" }}
+      </span>
+      <button type="submit" class="btn btn-primary" disabled title="Coming soon">
+        Start session
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent sessions</h2>
+  {% if sessions %}
+    <ul class="session-list">
+      {% for s in sessions %}
+        <li><a href="/sessions/{{ s.id }}">{{ s.title }}</a>
+          <span class="pill pill-{{ s.status }}">{{ s.status }}</span></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">No sessions yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

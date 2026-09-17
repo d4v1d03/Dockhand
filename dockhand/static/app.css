@@ -1,0 +1,141 @@
+/* Dockhand — one stylesheet, no build step.
+   Tokens first, then layout, then components. Dark mode via prefers-color-scheme. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e3e6ea;
+  --text: #1c2128;
+  --muted: #6b7380;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 10px;
+  --maxw: 960px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --surface: #171b21;
+    --border: #2a3039;
+    --text: #e6e9ee;
+    --muted: #8b95a3;
+    --accent: #3b82f6;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 var(--sans);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2 { margin: 0 0 .5rem; line-height: 1.2; }
+h1 { font-size: 1.4rem; }
+h2 { font-size: 1.1rem; }
+.muted { color: var(--muted); }
+
+/* ---- layout ---- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: .5rem; color: var(--text); font-weight: 600; }
+.brand:hover { text-decoration: none; }
+.brand-mark { font-size: 1.2rem; }
+.topnav { display: flex; gap: 1rem; }
+.topnav a { color: var(--muted); font-size: .92rem; }
+.topnav a:hover { color: var(--text); }
+
+.page {
+  width: 100%; max-width: var(--maxw); margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+  display: grid; gap: 1rem;
+  flex: 1;
+}
+.foot {
+  display: flex; justify-content: space-between; gap: 1rem;
+  padding: .75rem 1rem; font-size: .85rem; color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+
+/* ---- components ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.task-form { display: grid; gap: .9rem; margin-top: .75rem; }
+.task-form label { display: grid; gap: .3rem; font-weight: 500; }
+.task-form label em { font-weight: 400; font-style: normal; }
+textarea, input[type="url"], input[type="text"] {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .55rem .7rem;
+}
+textarea { resize: vertical; font-family: var(--sans); }
+textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.form-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+
+.btn {
+  font: inherit; font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: .5rem 1rem;
+  cursor: pointer;
+}
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.pill {
+  display: inline-block;
+  font-size: .78rem; font-weight: 600;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.pill-neutral { background: var(--bg); }
+.pill-queued, .pill-running { color: var(--accent); border-color: var(--accent); }
+.pill-completed { color: var(--ok); border-color: var(--ok); }
+.pill-waiting_for_user { color: var(--warn); border-color: var(--warn); }
+.pill-failed, .pill-cancelled { color: var(--err); border-color: var(--err); }
+
+.session-list { list-style: none; margin: 0; padding: 0; }
+.session-list li {
+  display: flex; justify-content: space-between; align-items: center; gap: .75rem;
+  padding: .55rem 0; border-top: 1px solid var(--border);
+}
+.empty { color: var(--muted); margin: .25rem 0 0; }
+
+/* ---- responsive ---- */
+@media (max-width: 640px) {
+  .topnav { gap: .7rem; }
+  .page { padding: .75rem .75rem 1.5rem; }
+  .card { padding: 1rem; }
+  .form-row { flex-direction: column; align-items: stretch; }
+  .btn { width: 100%; }
+}
