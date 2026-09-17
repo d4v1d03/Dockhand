@@ -71,26 +71,6 @@ workspaces, hardware-isolated sandboxes. See *Stretch* in the plan.
 
 ---
 
-## Status
-
-| Step | What | 10-day track | Status |
-| --- | --- | --- | --- |
-| 0 | Plan & documentation | — | ✅ done |
-| 1 | Project skeleton: FastAPI, Celery, Redis, Traefik, compose, sandbox image | Day 1 | ✅ |
-| 2 | Sandbox manager (Docker SDK): create / exec / read / write / destroy | Day 2 | ✅ |
-| 3 | LLM client + tools + agent loop + trace log (CLI, no web yet) | Days 3–4 | 🔨 in progress |
-| 4 | **Eval harness & trace viewer** — the number every later change is judged by | Day 4 | ⬜ |
-| 5 | Persistence, Celery task, event bus, SSE endpoint | Day 5 | ⬜ |
-| 6 | Web UI: new task, live session trace, per-step prompt view, stop | Day 6 | ⬜ |
-| 7 | Multi-turn, `ask_user`, diff & patch download | Day 7 | ⬜ |
-| 8 | Hardening essentials: reaper, limits, `compose up`, tests — **MVP complete** | Day 7 | ⬜ |
-| 9 | **AI-engineering labs** — 9.1 context engineering & prompt caching · 9.3 routing, structured outputs, reasoning models · 9.5 planner & verifier | Days 8–10 | ⬜ |
-| 9 | *later:* 9.4 guardrails · 9.2 retrieval (embeddings vs grep) · 9.6 MCP · 9.8 sub-agents · 9.7 fine-tuning (short) | later | ⬜ |
-| 10 | **Scale-out labs** — 10.2 load-balanced `web` · 10.3 worker pool & crash recovery | Days 9–10 | ⬜ |
-| 10 | *later:* 10.1 metrics · 10.5 caching · 10.4 rate limiting · 10.6–10.8 MinIO, Postgres, sharding | later | ⬜ |
-
----
-
 ## Quickstart
 
 *(Lands in Step 1. Target developer experience:)*
