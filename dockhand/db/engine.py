@@ -1,9 +1,11 @@
 """SQLAlchemy engine and session factory."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from dockhand.config import get_settings
 
@@ -49,3 +51,52 @@ def check_db() -> bool:
         return True
     except Exception:
         return False
+
+
+def init_db() -> None:
+    from dockhand.db import models
+
+    engine = get_engine()
+    models.Base.metadata.create_all(engine)
+    _add_missing_columns(engine, models.Base.metadata)
+
+
+def _add_missing_columns(engine: Engine, metadata) -> None:
+    """Poor man's migration: add columns that exist in the models but not in
+    an older on-disk table. Enough for SQLite in a single-user tool."""
+    if not engine.url.get_backend_name().startswith("sqlite"):
+        return
+    with engine.begin() as conn:
+        for table in metadata.sorted_tables:
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table.name})"))}
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+                ddl = col.type.compile(engine.dialect)
+                default = (
+                    col.default.arg if col.default is not None and col.default.is_scalar else None
+                )
+                clause = f" DEFAULT {default!r}" if default is not None else ""
+                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}{clause}"))
+
+
+@contextmanager
+def db_session() -> Iterator[Session]:
+    s = get_session_factory()()
+    try:
+        yield s
+        s.commit()
+    except Exception:
+        s.rollback()
+        raise
+    finally:
+        s.close()
+
+
+def reset_engine() -> None:
+    """Drop the cached engine (tests point DATABASE_URL somewhere else)."""
+    global _engine, _SessionLocal
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _SessionLocal = None

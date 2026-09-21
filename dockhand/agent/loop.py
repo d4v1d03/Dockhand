@@ -13,19 +13,17 @@ from typing import Any, Literal
 
 from dockhand.agent.tools import ToolRegistry
 from dockhand.config import get_settings
+from dockhand.events.types import (
+    EV_ASK_USER,
+    EV_ERROR,
+    EV_MESSAGE,
+    EV_TOOL_CALL,
+    EV_TOOL_RESULT,
+    EV_USAGE,
+)
 from dockhand.llm.client import LLMClient
 from dockhand.llm.types import Message, ToolCall, tool_result_message
 from dockhand.sandbox import SandboxProtocol
-
-# event names; payloads documented in docs/ARCHITECTURE.md
-EV_MESSAGE = "agent.message"  # {content}
-EV_TOOL_CALL = "agent.tool_call"  # {call_id, name, arguments}
-EV_TOOL_RESULT = (
-    "agent.tool_result"  # {call_id, name, output, exit_code, duration_ms, truncated, is_error}
-)
-EV_ASK_USER = "agent.ask_user"  # {question}
-EV_USAGE = "llm.usage"  # {step, prompt_tokens, completion_tokens, cached_tokens, model, latency_ms}
-EV_ERROR = "session.error"  # {message, recoverable}
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 

@@ -82,3 +82,19 @@ def test_make_tar_single_member_owned_by_agent():
         assert m.uid == AGENT_UID and m.gid == AGENT_UID
         assert m.mode == 0o644
         assert tar.extractfile(m).read() == data
+
+
+def test_parse_numstat_counts_and_skips_binary():
+    from dockhand.sandbox import parse_numstat
+
+    out = "12\t3\tsrc/app.py\n-\t-\tlogo.png\n0\t7\told.txt\n"
+    assert parse_numstat(out) == {"files": 3, "insertions": 12, "deletions": 10}
+    assert parse_numstat("") == {"files": 0, "insertions": 0, "deletions": 0}
+
+
+def test_fake_diff_stat():
+    sb = FakeSandbox(files={"a.txt": "one\ntwo\n"})
+    assert sb.diff_stat() == {"files": 0, "insertions": 0, "deletions": 0}
+    sb.write_file("a.txt", "one\nthree\n")
+    sb.write_file("b.txt", "new\n")
+    assert sb.diff_stat() == {"files": 2, "insertions": 2, "deletions": 1}

@@ -1,45 +1,48 @@
 # Dockhand
 
-> A self-hosted, from-scratch clone of Ona / Vorflux-style **AI coding agents**.
-> Give it a task (and optionally a git repo). It spins up an isolated Docker
-> sandbox, writes code, runs the tests, and streams every command it runs back
-> to your browser — until the job is done or you tell it to stop.
+A self-hosted AI coding agent. Give it a task and, optionally, a git repo. It spins
+up an isolated Docker sandbox, writes code, runs the tests, iterates on failures,
+and streams every command it runs back to you — until the job is done or you
+tell it to stop.
 
-Dockhand is a learning project: the goal is to understand, by building it, how
-products like Ona, Vorflux, Devin, Codex-cloud and Claude Code (web) actually
-work under the hood — the agent loop, tool calling, sandboxing, and streaming a
-live trace to a UI. It is deliberately small, but every piece that matters in a
-real product is here.
+Built from scratch, without an agent framework, to keep the whole loop visible:
+one file is the agent, one file is the sandbox boundary, one file is the LLM
+client. Works with any OpenAI-compatible provider (DeepSeek, Qwen, Kimi, GLM,
+Gemini, OpenRouter, …).
 
-Work is done in numbered steps: an MVP (Steps 1–8), then **AI-engineering
-labs** (evals, context engineering, routing, planner/verifier, guardrails,
-retrieval, MCP, …) and **scale-out labs** (load balancing, worker pools,
-caching, sharding). The core is scheduled as a **10-day track** (~45 h);
-the remaining labs are a *later* menu. See **[docs/PLAN.md](docs/PLAN.md)**
-for the schedule and **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for
-how it fits together.
+## What it does
 
----
-
-## What it does (MVP scope)
-
-| Feature | Description |
+| | |
 | --- | --- |
-| **Task in, code out** | Type a task in plain English. Optionally paste a public git URL — the agent works inside that repo. Or start from an empty workspace and let it scaffold. |
-| **Real sandbox** | Every session gets a fresh Docker container with a shell, git, Python and Node. CPU / memory / process limits. Thrown away when done. |
-| **Agent loop with tools** | The model plans, calls tools (`bash`, `read_file`, `write_file`, `edit_file`, `list_files`, `search`, `finish`), sees results, and iterates — the same ReAct-style loop every coding agent uses. |
-| **Live trace** | Every thought, tool call, command and its output streams to the browser over Server-Sent Events, as it happens. |
-| **Human in the loop** | Stop the agent at any time. Send follow-up messages. The agent can pause and ask *you* a question. |
-| **Diff & patch** | See exactly what changed (`git diff`) and download it as a `.patch`. |
-| **Any OpenAI-compatible model** | Primary targets are Chinese models — DeepSeek, Qwen, Kimi, GLM, MiniMax — via one config (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`). OpenRouter works too. |
-| **Usage tracking** | Tokens per LLM call, per session, shown in the UI. |
+| **Task in, code out** | Describe a task in plain English. Point at a public git URL or start from an empty workspace. |
+| **Real sandbox** | Every session gets a fresh container: non-root, all Linux capabilities dropped, memory/CPU/pid limits, no host mounts, no secrets inside. |
+| **Agent loop with tools** | `bash`, `read_file`, `write_file`, `edit_file`, `list_files`, `search`, `ask_user`, `finish`. The model plans, acts, reads the result, and iterates — the same ReAct-style loop every coding agent uses. |
+| **Live trace** | Every model turn, tool call and command output is an event; the CLI prints them as they happen, the web UI streams them over SSE. |
+| **Traces & usage** | Every LLM call is logged as JSONL with the exact request, response, tokens, cached tokens and latency. |
+| **Diff & patch** | See exactly what changed (`git diff`, build artefacts excluded) and take it as a patch. |
 
-Not in scope (for now): auth/multi-user, GitHub PR creation, persistent
-workspaces, hardware-isolated sandboxes. See *Stretch* in the plan.
+## How a run works
 
----
+```
+task ──▶ system prompt (env facts + workspace tree + method) + user message
+              │
+              ▼
+        ┌─ llm.chat(transcript, tool schemas) ──▶ model replies with tool calls
+        │        │
+        │        ▼
+        │   registry.run(call, sandbox) ──▶ docker exec / tar in / tar out
+        │        │
+        │        ▼
+        │   tool result appended to transcript, event emitted
+        └────────┘  repeat until `finish`, `ask_user`, cancel, or max_steps
+```
 
-## Architecture at a glance
+The model never runs anything itself — it only writes JSON asking for a tool.
+Every side effect happens inside the container, under the worker's limits.
+Every tool output is bounded (head + tail, with an omission marker) before it
+enters the context window.
+
+## Architecture
 
 ```
  Browser ──HTML/JSON──▶ ┌──────────────┐          ┌───────────────┐
@@ -47,55 +50,113 @@ workspaces, hardware-isolated sandboxes. See *Stretch* in the plan.
    │  SSE (live events) │  FastAPI +   │ ───────▶ │  Celery        │
    └────────────────────│  Jinja2      │          │                │
                         └──────┬───────┘          │  agent loop    │
-                               │                  │   ├─ LLM call ─┼──▶ DeepSeek / Qwen / Kimi …
+                               │                  │   ├─ LLM call ─┼──▶ any OpenAI-compatible API
                         ┌──────▼───────┐  events  │   └─ tools ────┼──▶ ┌─────────────────────┐
                         │  Redis       │ ◀─────── │                │    │  sandbox container  │
                         │  broker +    │          └───────┬────────┘    │  /workspace (repo)  │
                         │  event stream│                  │ docker API  │  bash, git, py, node│
                         └──────────────┘                  └────────────▶│  non-root, limited  │
                         ┌──────────────┐                                └─────────────────────┘
-                        │  SQLite      │  sessions · messages · events
+                        │  SQLite      │  sessions · transcript · events
                         └──────────────┘
 ```
 
-* **web** — serves the pages, the JSON API and the SSE stream. Never talks to
-  Docker or the LLM directly.
-* **worker** — runs one `run_session` Celery task per agent run: creates the
-  sandbox, drives the LLM ↔ tools loop, publishes events.
-* **Redis** — Celery broker *and* a per-session event stream that the SSE
-  endpoint tails.
-* **SQLite** — durable record of sessions, the LLM transcript, and the event
-  timeline (so a page reload or a follow-up message can pick up where it left off).
-* **sandbox** — one throwaway container per session, built from
-  `sandbox/Dockerfile`. All tools execute inside it.
+* `web` serves pages, the JSON API and the SSE stream. It never touches Docker or the LLM.
+* `worker` runs one Celery task per agent run: creates the sandbox, drives the
+  loop, publishes events. `acks_late` + resumable transcripts mean a crashed
+  worker's run is picked up, not lost.
+* Redis is the Celery broker and carries a per-session event stream that the
+  SSE endpoint tails (replay via `Last-Event-ID`).
+* SQLite holds sessions, the LLM transcript, and the event timeline.
+* A Traefik reverse proxy fronts `web`, so `docker compose up --scale web=3`
+  works unchanged.
 
----
+## Sandbox guarantees
+
+| Concern | Mitigation |
+| --- | --- |
+| Agent runs arbitrary code | One container per session; user `agent` (uid 1000); `--cap-drop ALL`; `no-new-privileges`; memory / CPU / pids limits; no host mounts |
+| Runaway commands | Wrapped in the container's own `timeout` (default 120 s, max 600 s) |
+| Runaway agent | `MAX_STEPS`; every limit surfaces as a clear error, never a hang |
+| Context blow-up | Tool output capped and truncated head+tail; `read_file` paged at 400 lines |
+| Secrets | The sandbox receives no API key and no host environment |
+| Network exfiltration | `SANDBOX_NETWORK=none` turns the sandbox fully offline |
+| Stray containers | Every container is labelled; `make clean-sandboxes` and a TTL reaper |
+
+This is a single-user dev tool: the worker holds the Docker socket, which is
+root-equivalent on the host. Don't expose it to the internet as-is.
 
 ## Quickstart
 
-*(Lands in Step 1. Target developer experience:)*
-
 ```bash
-cp .env.example .env            # add LLM_API_KEY / LLM_BASE_URL / LLM_MODEL
-docker build -t dockhand-sandbox sandbox/
-docker compose up               # redis + web + worker
-# open http://localhost:8088   (dev without compose: :8000)
+cp .env.example .env            # set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+make build-sandbox              # the image agents run in
+docker compose up               # redis + traefik + web + worker → http://localhost:8088
 ```
 
-For day-to-day development you'll run Redis in Docker and `web` / `worker`
-directly with `uv run` so reloads are instant. Details in the plan.
+No API key yet? `LLM_BASE_URL=fake` runs a scripted demo model against real
+sandboxes, enough to try the UI end to end.
 
----
+Run the agent from the terminal, no web stack needed:
+
+```bash
+docker compose up -d redis
+uv sync
+uv run python -m dockhand.agent.cli "Add a --version flag and a test for it" --repo https://github.com/you/repo
+uv run python -m dockhand.agent.cli "Create a CSV→JSON CLI with pytest tests and make them pass"
+```
+
+Every run writes `data/traces/<run_id>.jsonl` — the exact prompt the model saw at
+each step, its reply, tokens and latency.
+
+## Configuration
+
+| var | default | |
+| --- | --- | --- |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | — | any OpenAI-compatible endpoint |
+| `LLM_TEMPERATURE` | `0.2` | |
+| `REDIS_URL` | `redis://localhost:6379/0` | |
+| `DATABASE_URL` | `sqlite:///data/dockhand.db` | |
+| `SANDBOX_IMAGE` | `dockhand-sandbox:latest` | |
+| `SANDBOX_NETWORK` | `bridge` | `none` for offline |
+| `SANDBOX_MEMORY` / `SANDBOX_CPUS` | `2g` / `2` | |
+| `SANDBOX_TTL_MINUTES` | `60` | idle containers are reaped after this |
+| `MAX_STEPS` | `40` | LLM calls per run |
+| `MAX_TOOL_OUTPUT_CHARS` | `8000` | |
+| `DEFAULT_TOOL_TIMEOUT_S` / `MAX_TOOL_TIMEOUT_S` | `120` / `600` | |
+| `TRAEFIK_PORT` | `8088` | host port for the compose stack |
+
+## Layout
+
+```
+dockhand/
+├── config.py            settings
+├── main.py              FastAPI app · web/ (pages, api, sse)
+├── worker.py            Celery app · run_session · reap_sandboxes
+├── db/                  SQLAlchemy engine · models
+├── sandbox/             Sandbox (Docker) · FakeSandbox · SandboxProtocol
+├── llm/                 OpenAI-compatible client · FakeLLM · trace writer
+└── agent/               tools · prompts · loop (run_agent) · cli
+sandbox/Dockerfile       the image agents run in
+tests/unit               FakeLLM + FakeSandbox, no Docker needed
+tests/integration        real containers (skipped when no daemon)
+```
+
+## Development
+
+```bash
+make test        # unit tests
+make test-all    # + integration tests against real containers
+make lint        # ruff
+make web         # uvicorn with reload on :8000
+make worker      # celery worker
+```
 
 ## Docs
 
-* [docs/PLAN.md](docs/PLAN.md) — step-by-step build plan, the concepts map
-  (what a founding AI engineer should be able to explain), definition of
-  done per step, the AI-engineering and scale-out labs.
-* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, data model, agent
-  loop, event types, sandbox design, security.
-* [docs/DECISIONS.md](docs/DECISIONS.md) — why FastAPI + Celery, why SSE, why
-  Redis Streams, why OpenAI-compatible, etc.
+* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — processes, session lifecycle, data model, streaming, agent loop, sandbox, HTTP surface.
+* [docs/DECISIONS.md](docs/DECISIONS.md) — architecture decision records.
+* [docs/ROADMAP.md](docs/ROADMAP.md) — what's done, what's next.
 
 ## License
 

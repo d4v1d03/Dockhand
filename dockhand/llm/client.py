@@ -39,6 +39,16 @@ class LLMConfigError(RuntimeError):
     pass
 
 
+def make_llm(trace: TraceWriter | None = None) -> LLMClient:
+    """The configured client: a real provider, or the demo model when
+    LLM_BASE_URL=fake (no key, no tokens; real sandbox)."""
+    if get_settings().llm_base_url.strip().lower() == "fake":
+        from dockhand.llm.demo import DemoLLM
+
+        return DemoLLM(trace=trace)
+    return OpenAICompatibleClient.from_settings(trace=trace)
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,

@@ -6,7 +6,7 @@
   <h1>New task</h1>
   <p class="muted">
     Describe what you want done. Optionally point at a public git repository —
-    the agent will clone it into a fresh sandbox and work there.
+    the agent clones it into a fresh sandbox and works there.
   </p>
 
   <form class="task-form" method="post" action="/api/sessions">
@@ -15,19 +15,15 @@
       <textarea name="prompt" rows="5" required
         placeholder="e.g. Add a --version flag to the CLI and write a test for it."></textarea>
     </label>
-
     <label>
       <span>Repository URL <em class="muted">(optional)</em></span>
       <input type="url" name="repo_url" placeholder="https://github.com/owner/repo">
     </label>
-
     <div class="form-row">
       <span class="pill pill-neutral" title="Set LLM_MODEL in .env">
         {{ settings.llm_model or "no model configured" }}
       </span>
-      <button type="submit" class="btn btn-primary" disabled title="Coming soon">
-        Start session
-      </button>
+      <button type="submit" class="btn btn-primary">Start session</button>
     </div>
   </form>
 </section>
@@ -37,8 +33,13 @@
   {% if sessions %}
     <ul class="session-list">
       {% for s in sessions %}
-        <li><a href="/sessions/{{ s.id }}">{{ s.title }}</a>
-          <span class="pill pill-{{ s.status }}">{{ s.status }}</span></li>
+        <li>
+          <div class="session-row">
+            <a href="/sessions/{{ s.id }}">{{ s.title }}</a>
+            <span class="muted small">{{ s.model }} · {{ s.steps }} steps · {{ s.created_at[:16].replace("T", " ") }}</span>
+          </div>
+          <span class="pill pill-{{ s.status }}">{{ s.status }}</span>
+        </li>
       {% endfor %}
     </ul>
   {% else %}

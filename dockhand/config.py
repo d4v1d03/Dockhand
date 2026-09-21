@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""
     llm_temperature: float = 0.2
+    prompt_version: str = "v1"
 
     # infra
     redis_url: str = "redis://localhost:6379/0"

@@ -5,6 +5,7 @@ from dockhand.sandbox.base import (
     SandboxFileNotFound,
     SandboxNotFound,
     SandboxProtocol,
+    parse_numstat,
     resolve_path,
 )
 from dockhand.sandbox.fake import FakeSandbox
@@ -19,5 +20,6 @@ __all__ = [
     "SandboxFileNotFound",
     "SandboxNotFound",
     "SandboxProtocol",
+    "parse_numstat",
     "resolve_path",
 ]

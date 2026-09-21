@@ -1,5 +1,6 @@
 """FastAPI app."""
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis
@@ -9,8 +10,10 @@ from fastapi.staticfiles import StaticFiles
 
 from dockhand import __version__
 from dockhand.config import get_settings
-from dockhand.db.engine import check_db
+from dockhand.db.engine import check_db, init_db
+from dockhand.web.api import router as api_router
 from dockhand.web.pages import router as pages_router
+from dockhand.web.stream import router as stream_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -25,10 +28,18 @@ def check_redis() -> bool:
         return False
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Dockhand", version=__version__)
+    app = FastAPI(title="Dockhand", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(pages_router)
+    app.include_router(api_router)
+    app.include_router(stream_router)
 
     @app.get("/health")
     def health():

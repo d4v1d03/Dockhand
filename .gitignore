@@ -34,4 +34,5 @@ node_modules/
 dist/
 build/
 
-docs/
+# working notes
+notes/

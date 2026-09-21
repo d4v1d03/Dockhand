@@ -10,7 +10,7 @@ def make_client() -> TestClient:
     return TestClient(main.app)
 
 
-def test_index_renders_new_task_form():
+def test_index_renders_new_task_form(db):
     r = make_client().get("/")
     assert r.status_code == 200
     assert "New task" in r.text

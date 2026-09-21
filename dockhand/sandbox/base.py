@@ -34,6 +34,21 @@ class ExecResult:
         return self.exit_code == 0
 
 
+def parse_numstat(output: str) -> dict[str, int]:
+    """`git diff --numstat` → {files, insertions, deletions}. Binary files show as `-\t-`."""
+    files = ins = dels = 0
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        files += 1
+        if parts[0].isdigit():
+            ins += int(parts[0])
+        if parts[1].isdigit():
+            dels += int(parts[1])
+    return {"files": files, "insertions": ins, "deletions": dels}
+
+
 def resolve_path(path: str) -> str:
     if not path:
         return WORKSPACE
@@ -60,6 +75,8 @@ class SandboxProtocol(Protocol):
     def write_file(self, path: str, content: str) -> None: ...
 
     def diff(self) -> str: ...
+
+    def diff_stat(self) -> dict[str, int]: ...
 
     def is_alive(self) -> bool: ...
 

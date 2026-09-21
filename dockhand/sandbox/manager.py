@@ -20,6 +20,7 @@ from dockhand.sandbox.base import (
     SandboxError,
     SandboxFileNotFound,
     SandboxNotFound,
+    parse_numstat,
     resolve_path,
 )
 
@@ -283,6 +284,12 @@ class Sandbox:
             ["git", "diff", "--no-color", "--", *pathspec], timeout_s=60, max_output_bytes=5_000_000
         )
         return result.output
+
+    def diff_stat(self) -> dict[str, int]:
+        pathspec = [".", *DIFF_EXCLUDES]
+        self.exec(["git", "add", "-A", "-N", "--", *pathspec], timeout_s=30)
+        r = self.exec(["git", "diff", "--numstat", "--", *pathspec], timeout_s=30)
+        return parse_numstat(r.output if r.ok else "")
 
 
 # ---------------------------------------------------------------------- helpers

@@ -81,6 +81,9 @@ def test_diff_includes_new_and_modified_files(sandbox):
     sandbox.write_file("hello.py", "print('bye')\n")
     d2 = sandbox.diff()
     assert "-print('hi')" in d2 and "+print('bye')" in d2 and "new file" not in d2
+    assert sandbox.diff_stat() == {"files": 1, "insertions": 1, "deletions": 1}
+    sandbox.write_file("__pycache__/x.pyc", "junk")  # excluded from stats too
+    assert sandbox.diff_stat()["files"] == 1
 
 
 def test_attach_and_destroy_lifecycle():

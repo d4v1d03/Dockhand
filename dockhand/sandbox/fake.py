@@ -95,6 +95,19 @@ class FakeSandbox:
             )
         return "".join(line if line.endswith("\n") else line + "\n" for line in out)
 
+    def diff_stat(self) -> dict[str, int]:
+        files = ins = dels = 0
+        for path in set(self._initial_files) | set(self.files):
+            before, after = self._initial_files.get(path), self.files.get(path)
+            if before == after:
+                continue
+            files += 1
+            b = set(enumerate((before or "").splitlines()))
+            a = set(enumerate((after or "").splitlines()))
+            ins += len(a - b)
+            dels += len(b - a)
+        return {"files": files, "insertions": ins, "deletions": dels}
+
     # ------------------------------------------------------------------ lifecycle
 
     def is_alive(self) -> bool:
