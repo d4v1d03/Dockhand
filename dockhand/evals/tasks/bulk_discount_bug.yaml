@@ -1,0 +1,364 @@
+name: bulk_discount_bug
+kind: empty
+max_steps: 30
+setup:
+  inventory/__init__.py: |
+    """Inventory, pricing and monthly reporting for a small wholesale shop."""
+
+    __all__ = ["catalog", "models", "pricing", "reports"]
+  inventory/models.py: |
+    """Plain data types. Money is always an integer number of cents."""
+
+    from __future__ import annotations
+
+    from dataclasses import dataclass, field
+
+    TIERS = ("standard", "silver", "gold")
+
+
+    @dataclass(frozen=True)
+    class Item:
+        """Something the shop sells."""
+
+        sku: str
+        name: str
+        unit_price_cents: int
+        category: str
+
+        def __post_init__(self) -> None:
+            if not self.sku:
+                raise ValueError("sku must not be empty")
+            if self.unit_price_cents < 0:
+                raise ValueError(f"{self.sku}: price must not be negative")
+            if not self.category:
+                raise ValueError(f"{self.sku}: category must not be empty")
+
+
+    @dataclass(frozen=True)
+    class Line:
+        """One line of an order: a quantity of one item."""
+
+        sku: str
+        qty: int
+
+        def __post_init__(self) -> None:
+            if self.qty <= 0:
+                raise ValueError(f"{self.sku}: quantity must be positive, got {self.qty}")
+
+
+    @dataclass
+    class Order:
+        """A customer order. The tier decides the order-level discount."""
+
+        id: str
+        lines: list[Line] = field(default_factory=list)
+        customer_tier: str = "standard"
+
+        def __post_init__(self) -> None:
+            if self.customer_tier not in TIERS:
+                raise ValueError(f"{self.id}: unknown tier {self.customer_tier!r}")
+
+        @property
+        def units(self) -> int:
+            return sum(line.qty for line in self.lines)
+
+        def skus(self) -> list[str]:
+            return [line.sku for line in self.lines]
+  inventory/catalog.py: |
+    """The catalog of items for sale."""
+
+    from __future__ import annotations
+
+    from collections.abc import Iterable
+
+    from inventory.models import Item
+
+
+    class UnknownSku(KeyError):
+        """Raised when an order refers to an item that is not in the catalog."""
+
+
+    class Catalog:
+        def __init__(self, items: Iterable[Item] = ()):
+            self._items: dict[str, Item] = {}
+            for item in items:
+                self.add(item)
+
+        def add(self, item: Item) -> None:
+            if item.sku in self._items:
+                raise ValueError(f"duplicate sku {item.sku}")
+            self._items[item.sku] = item
+
+        def get(self, sku: str) -> Item:
+            try:
+                return self._items[sku]
+            except KeyError:
+                raise UnknownSku(sku) from None
+
+        def __contains__(self, sku: str) -> bool:
+            return sku in self._items
+
+        def __len__(self) -> int:
+            return len(self._items)
+
+        def categories(self) -> list[str]:
+            return sorted({item.category for item in self._items.values()})
+
+        def in_category(self, category: str) -> list[Item]:
+            return sorted(
+                (i for i in self._items.values() if i.category == category), key=lambda i: i.sku
+            )
+
+        def search(self, text: str) -> list[Item]:
+            """Case-insensitive substring search over sku and name."""
+            needle = text.lower()
+            return [
+                i for i in self._items.values() if needle in i.sku.lower() or needle in i.name.lower()
+            ]
+
+        @classmethod
+        def from_rows(cls, rows: Iterable[dict]) -> Catalog:
+            """Build from dicts with keys sku, name, price_cents, category."""
+            return cls(
+                Item(r["sku"], r["name"], int(r["price_cents"]), r["category"]) for r in rows
+            )
+  inventory/pricing.py: |
+    """Pricing rules.
+
+    Two discounts exist and they stack:
+
+    * bulk — BULK_DISCOUNT off a line whose quantity is BULK_THRESHOLD or more;
+    * tier — a percentage off the whole order, by customer tier.
+
+    Amounts are integer cents. Every rounding step rounds half up.
+    """
+
+    from __future__ import annotations
+
+    from decimal import ROUND_HALF_UP, Decimal
+
+    from inventory.catalog import Catalog
+    from inventory.models import Order
+
+    BULK_THRESHOLD = 10
+    BULK_DISCOUNT = Decimal("0.10")
+    TIER_DISCOUNTS = {
+        "standard": Decimal("0"),
+        "silver": Decimal("0.02"),
+        "gold": Decimal("0.05"),
+    }
+
+
+    def _round(amount: Decimal) -> int:
+        return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+    def line_total(unit_price_cents: int, qty: int) -> int:
+        """Price of one order line, bulk discount included."""
+        if qty <= 0:
+            raise ValueError("quantity must be positive")
+        gross = Decimal(unit_price_cents) * qty
+        if qty >= BULK_THRESHOLD:
+            gross *= 1 - BULK_DISCOUNT
+        return _round(gross)
+
+
+    def tier_discount(tier: str) -> Decimal:
+        try:
+            return TIER_DISCOUNTS[tier]
+        except KeyError:
+            raise ValueError(f"unknown tier {tier!r}") from None
+
+
+    def order_subtotal(order: Order, catalog: Catalog) -> int:
+        """Sum of line totals, before the tier discount."""
+        subtotal = 0
+        for line in order.lines:
+            item = catalog.get(line.sku)
+            amount = line_total(item.unit_price_cents, line.qty)
+            # wholesale customers get the bulk rate on big lines
+            if line.qty >= BULK_THRESHOLD:
+                amount = _round(Decimal(amount) * (1 - BULK_DISCOUNT))
+            subtotal += amount
+        return subtotal
+
+
+    def order_total(order: Order, catalog: Catalog) -> int:
+        """What the customer pays for an order."""
+        subtotal = Decimal(order_subtotal(order, catalog))
+        return _round(subtotal * (1 - tier_discount(order.customer_tier)))
+  inventory/reports.py: |
+    """Monthly reporting."""
+
+    from __future__ import annotations
+
+    from collections import defaultdict
+    from collections.abc import Iterable
+
+    from inventory.catalog import Catalog
+    from inventory.models import Order
+    from inventory.pricing import line_total, order_total
+
+
+    def monthly_report(orders: Iterable[Order], catalog: Catalog) -> dict:
+        """Revenue for a month.
+
+        grand_total_cents is what customers paid (all discounts applied);
+        by_category_cents is line revenue per category before tier discounts.
+        """
+        orders = list(orders)
+        by_category: dict[str, int] = defaultdict(int)
+        units: dict[str, int] = defaultdict(int)
+        grand_total = 0
+        for order in orders:
+            grand_total += order_total(order, catalog)
+            for line in order.lines:
+                item = catalog.get(line.sku)
+                by_category[item.category] += line_total(item.unit_price_cents, line.qty)
+                units[item.category] += line.qty
+        return {
+            "orders": len(orders),
+            "grand_total_cents": grand_total,
+            "by_category_cents": dict(sorted(by_category.items())),
+            "units_by_category": dict(sorted(units.items())),
+        }
+
+
+    def format_cents(cents: int) -> str:
+        sign = "-" if cents < 0 else ""
+        cents = abs(cents)
+        return f"{sign}${cents // 100:,}.{cents % 100:02d}"
+
+
+    def format_report(report: dict) -> str:
+        lines = [
+            f"Orders: {report['orders']}",
+            f"Revenue: {format_cents(report['grand_total_cents'])}",
+            "",
+            "By category (before tier discounts):",
+        ]
+        for category, cents in report["by_category_cents"].items():
+            units = report["units_by_category"].get(category, 0)
+            lines.append(f"  {category:<12} {format_cents(cents):>12}  ({units} units)")
+        return "\n".join(lines)
+  inventory/cli.py: |
+    """python3 -m inventory.cli catalog.json orders.json"""
+
+    from __future__ import annotations
+
+    import argparse
+    import json
+    import sys
+
+    from inventory.catalog import Catalog
+    from inventory.models import Line, Order
+    from inventory.reports import format_report, monthly_report
+
+
+    def load_orders(rows: list[dict]) -> list[Order]:
+        return [
+            Order(
+                id=r["id"],
+                lines=[Line(sku=x["sku"], qty=int(x["qty"])) for x in r["lines"]],
+                customer_tier=r.get("tier", "standard"),
+            )
+            for r in rows
+        ]
+
+
+    def main(argv: list[str] | None = None) -> int:
+        ap = argparse.ArgumentParser(prog="inventory")
+        ap.add_argument("catalog")
+        ap.add_argument("orders")
+        args = ap.parse_args(argv)
+        with open(args.catalog) as f:
+            catalog = Catalog.from_rows(json.load(f))
+        with open(args.orders) as f:
+            orders = load_orders(json.load(f))
+        print(format_report(monthly_report(orders, catalog)))
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+  tests/test_pricing.py: |
+    from inventory.catalog import Catalog
+    from inventory.models import Item, Line, Order
+    from inventory.pricing import line_total, order_total
+
+
+    def catalog():
+        return Catalog([Item("A", "Widget", 1000, "tools"), Item("B", "Gadget", 250, "toys")])
+
+
+    def test_line_total_without_bulk():
+        assert line_total(250, 3) == 750
+
+
+    def test_line_total_with_bulk():
+        assert line_total(100, 10) == 900
+
+
+    def test_gold_tier_discount():
+        assert order_total(Order("o1", [Line("A", 2)], "gold"), catalog()) == 1900
+
+
+    def test_standard_small_order():
+        assert order_total(Order("o2", [Line("B", 4)]), catalog()) == 1000
+  tests/test_reports.py: |
+    from inventory.catalog import Catalog
+    from inventory.models import Item, Line, Order
+    from inventory.reports import format_cents, monthly_report
+
+
+    def test_format_cents():
+        assert format_cents(123456) == "$1,234.56"
+        assert format_cents(5) == "$0.05"
+
+
+    def test_small_orders_report():
+        cat = Catalog([Item("A", "Widget", 1000, "tools"), Item("B", "Gadget", 250, "toys")])
+        r = monthly_report([Order("o1", [Line("A", 1), Line("B", 2)])], cat)
+        assert r["orders"] == 1
+        assert r["grand_total_cents"] == 1500
+        assert r["by_category_cents"] == {"tools": 1000, "toys": 500}
+prompt: |
+  Finance reports that bulk customers (10 or more of one item on a line) are being
+  undercharged: the monthly revenue report comes out too low, and they think the bulk
+  discount is being applied twice. Find the root cause in the inventory package and fix
+  it without changing the discount rules themselves. Keep the existing tests passing and
+  add a regression test for a bulk order.
+hidden:
+  tests/test_hidden_bulk.py: |
+    import sys
+
+    sys.path.insert(0, "/workspace")
+
+    from inventory.catalog import Catalog
+    from inventory.models import Item, Line, Order
+    from inventory.pricing import line_total, order_total
+    from inventory.reports import monthly_report
+
+
+    def _cat():
+        return Catalog([Item("A", "Widget", 1000, "tools"), Item("B", "Gadget", 250, "toys")])
+
+
+    def test_bulk_discount_applied_once():
+        assert order_total(Order("o1", [Line("A", 10)]), _cat()) == 9000
+
+
+    def test_bulk_and_tier_stack_once():
+        order = Order("o2", [Line("A", 10), Line("B", 4)], "gold")
+        assert order_total(order, _cat()) == 9500  # (9000 + 1000) * 0.95
+
+
+    def test_report_grand_total():
+        orders = [Order("o1", [Line("A", 10)]), Order("o2", [Line("B", 2)], "silver")]
+        assert monthly_report(orders, _cat())["grand_total_cents"] == 9490  # 9000 + 490
+
+
+    def test_discount_rules_unchanged():
+        assert line_total(100, 10) == 900 and line_total(100, 9) == 900
+        assert line_total(250, 3) == 750
+check: python3 -m pytest -q tests/
